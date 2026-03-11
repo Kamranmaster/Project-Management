@@ -1,11 +1,15 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import { ApiError } from "./utils/api-error.js";
 
 const app = express();
 
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(express.static("public"));
+
+app.use(cookieParser());
 
 //cors configuration,it may take 4 to 5 second to allowed CORS ,be patient!!
 
@@ -23,10 +27,23 @@ app.use(
 
 import healthCheckRouter from "./routes/healthcheck.routes.js";
 
+import authRouter from "./routes/auth.routes.js";
+
 app.use("/api/v1/healthcheck",healthCheckRouter);
+app.use("/api/v1/auth",authRouter);
 
 app.get("/", (req, res) => {
   res.send("welcome to basecampy");
 });
 
+app.use((err, req, res, next) => {
+  const statusCode = err instanceof ApiError ? err.statusCode : 500;
+
+  return res.status(statusCode).json({
+    success: false,
+    message: err.message || "Internal server error",
+    errors: err.errors || [],
+  });
+});
+ 
 export default app;
