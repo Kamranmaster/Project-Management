@@ -1,7 +1,7 @@
 import mongoose,{Schema} from 'mongoose';
 
 
-import {AvailalbeTaskStatus,AvailalbeUserRole,UserRolesEnum} from "../utils/constants.js";
+import {AvailalbeUserRole,UserRolesEnum} from "../utils/constants.js";
 
 const projectMemberSchema = new Schema({
     user:{
@@ -11,13 +11,15 @@ const projectMemberSchema = new Schema({
 
     },
     project:{
-        type:Schema.type.ObjectId,
+        type:Schema.Types.ObjectId,
         ref:"Project",
         required:true
     },
     role:{
         type:String,
         enum:AvailalbeUserRole,
-        default:UserRolesEnum.MEMEBER
+        default:UserRolesEnum.MEMBER
     }
 },{timestamps:true});
+
+export const ProjectMember=mongoose.model("ProjectMember",projectMemberSchema);

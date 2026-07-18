@@ -3,6 +3,8 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { ApiError } from "./utils/api-error.js";
 
+import projectRouter from "./routes/project.routes.js";
+
 const app = express();
 
 app.use(express.json({ limit: "16kb" }));
@@ -31,6 +33,7 @@ import authRouter from "./routes/auth.routes.js";
 
 app.use("/api/v1/healthcheck",healthCheckRouter);
 app.use("/api/v1/auth",authRouter);
+app.use("/api/v1/projects",projectRouter);
 
 app.get("/", (req, res) => {
   res.send("welcome to basecampy");

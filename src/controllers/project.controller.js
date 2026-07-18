@@ -106,7 +106,7 @@ const createProject= asyncHandler(async(req,res)=>{
   const project=await Project.create({
     name,
     description,
-    created_By: new mongoose.Types.ObjectId(req.user.id),
+    createdBy: new mongoose.Types.ObjectId(req.user.id),
   });
 
   await ProjectMember.create({
@@ -210,7 +210,7 @@ const getProjectMembers= asyncHandler(async(req,res)=>{
     {
       $lookup:{
         from:"users",
-        localFields:"user",
+        localField:"user",
         foreignField:"_id",
         as:"user",
 
