@@ -104,7 +104,34 @@ const addMembertoProjectorValidator=()=>{
     ]
 }
 
+const createTaskValidator=()=>{
+    return [
+        body("title")
+            .trim()
+            .notEmpty()
+            .withMessage("Title is required"),
+        body("description").optional(),
+        body("assignedTo").optional(),
+    ]
+}
 
+const createSubTaskValidator=()=>{
+    return [
+        body("title")
+            .trim()
+            .notEmpty()
+            .withMessage("Title is required"),
+    ]
+}
+
+const createNoteValidator=()=>{
+    return [
+        body("content")
+            .trim()
+            .notEmpty()
+            .withMessage("Content is required"),
+    ]
+}
 
 export {
   userRegisterValidator,
@@ -114,4 +141,7 @@ export {
   userResetForgotPasswordValidator,
   createProjectValidator,
   addMembertoProjectorValidator,
+  createTaskValidator,
+  createSubTaskValidator,
+  createNoteValidator,
 };

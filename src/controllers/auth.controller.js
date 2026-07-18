@@ -162,8 +162,8 @@ const getCurrentUser=asyncHandler(async(req,res)=>{
         .json(
             new ApiResponse(
                 200,
-                req.User,
-                "Current User is ${req.User}"
+                req.user,
+                "Current user fetched successfully"
             )
         )
 });
