@@ -1,2 +1,6 @@
 node_modules
 .env
+dist
+*.tsbuildinfo
+public/images/*
+!public/images/.gitkeep

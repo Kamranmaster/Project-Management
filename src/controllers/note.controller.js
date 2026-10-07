@@ -5,6 +5,13 @@ import { asyncHandler } from "../utils/async-handles.js";
 import { ApiError } from "../utils/api-error.js";
 import mongoose from "mongoose";
 
+// Notes are always looked up within their project so a member of one
+// project can't read or modify another project's notes by id.
+const projectNoteFilter = (projectId, noteId) => ({
+  _id: new mongoose.Types.ObjectId(noteId),
+  project: new mongoose.Types.ObjectId(projectId),
+});
+
 const getNotes = asyncHandler(async (req, res) => {
   const { projectId } = req.params;
 
@@ -26,9 +33,9 @@ const getNotes = asyncHandler(async (req, res) => {
 });
 
 const getNoteById = asyncHandler(async (req, res) => {
-  const { noteId } = req.params;
+  const { projectId, noteId } = req.params;
 
-  const note = await ProjectNote.findById(noteId).populate(
+  const note = await ProjectNote.findOne(projectNoteFilter(projectId, noteId)).populate(
     "createdBy",
     "username FullName avatar email"
   );
@@ -64,11 +71,11 @@ const createNote = asyncHandler(async (req, res) => {
 });
 
 const updateNote = asyncHandler(async (req, res) => {
-  const { noteId } = req.params;
+  const { projectId, noteId } = req.params;
   const { content } = req.body;
 
-  const note = await ProjectNote.findByIdAndUpdate(
-    noteId,
+  const note = await ProjectNote.findOneAndUpdate(
+    projectNoteFilter(projectId, noteId),
     { content },
     { new: true }
   );
@@ -83,9 +90,9 @@ const updateNote = asyncHandler(async (req, res) => {
 });
 
 const deleteNote = asyncHandler(async (req, res) => {
-  const { noteId } = req.params;
+  const { projectId, noteId } = req.params;
 
-  const note = await ProjectNote.findByIdAndDelete(noteId);
+  const note = await ProjectNote.findOneAndDelete(projectNoteFilter(projectId, noteId));
 
   if (!note) {
     throw new ApiError(404, "Note not found");

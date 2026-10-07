@@ -1,10 +1,8 @@
-import dotenv from "dotenv";
+// Must be the first import: ES modules evaluate imports before this file's
+// body, so app.js would otherwise read process.env before .env is loaded.
+import "dotenv/config";
 import app from "./app.js";
 import connectDB from "./db/database.js";
-
-dotenv.config({
-  path: "./.env",
-});
 
 
 const port = process.env.PORT || 3000;

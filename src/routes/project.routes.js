@@ -44,16 +44,11 @@ router
     validate,
     updateProject,
   )
-  .delete(
-    validateProjectPermission([UserRolesEnum.ADMIN]),
-    createProjectValidator(),
-    validate,
-    deleteProject,
-  );
+  .delete(validateProjectPermission([UserRolesEnum.ADMIN]), deleteProject);
 
 router
   .route("/:projectId/members")
-  .get(getProjectMembers)
+  .get(validateProjectPermission(AvailalbeUserRole), getProjectMembers)
   .post(
     validateProjectPermission([UserRolesEnum.ADMIN,
       UserRolesEnum.PROJECT_ADMIN,]),addMembertoProjectorValidator(),validate,

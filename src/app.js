@@ -17,7 +17,7 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN?.split(",") || "http://localhost:5173",
+    origin: process.env.CORS_ORIGIN?.split(",").map((origin) => origin.trim()) || "http://localhost:5173",
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -46,11 +46,30 @@ app.get("/", (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  const statusCode = err instanceof ApiError ? err.statusCode : 500;
+  let statusCode = err instanceof ApiError ? err.statusCode : 500;
+  let message = err.message || "Internal server error";
+
+  // Malformed ObjectId in a route param (e.g. /projects/not-an-id)
+  if (err.name === "BSONError" || err.name === "CastError") {
+    statusCode = 400;
+    message = "Invalid id";
+  }
+
+  // Unique index violation, e.g. duplicate project name
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyValue || {})[0] || "value";
+    statusCode = 409;
+    message = `A record with this ${field} already exists`;
+  }
+
+  // Upload errors such as LIMIT_FILE_SIZE / LIMIT_UNEXPECTED_FILE
+  if (err.name === "MulterError") {
+    statusCode = 400;
+  }
 
   return res.status(statusCode).json({
     success: false,
-    message: err.message || "Internal server error",
+    message,
     errors: err.errors || [],
   });
 });

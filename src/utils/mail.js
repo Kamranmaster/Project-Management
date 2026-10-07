@@ -23,13 +23,13 @@ const sendEmail=async (options)=>{
         }
     })
 
-    const mail={
-        from:"mail.taskmanager@example.com",
-        to:options.email,
-        subject:options.subject,
-        text:emailTextual,
-        html:emailhtml
-    }
+    const mail = {
+      from: "mail.taskmanager@example.com",
+      to: options.email,
+      subject: options.subject,
+      text: emailTextual,
+      html: emailhtml,
+    };
 
     try{
         await transporter.sendMail(mail)
