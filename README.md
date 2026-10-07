@@ -2,10 +2,14 @@
 
 A full-stack project-management application. Teams create projects, invite members with per-project roles, plan work on a task board (tasks, subtasks and file attachments), and share project notes.
 
+**Live app:** https://project-management-xi-red-13.vercel.app
+(frontend on Vercel, API on Render, database on MongoDB Atlas; the first request after a quiet period can take up to a minute while the free Render instance wakes up)
+
 - **Backend:** Express 5 REST API + MongoDB (Mongoose), in `src/`
 - **Frontend:** React 19 + TypeScript SPA (Vite), in `frontend/`
 - **Product requirements:** [PRD.md](PRD.md)
 - **Architecture & flow diagrams:** [project_flowchart.md](project_flowchart.md)
+- **Preparing to present this project?** See [section 22: interview guide](#22-interview-guide)
 
 ---
 
@@ -32,6 +36,7 @@ A full-stack project-management application. Teams create projects, invite membe
 19. [Known limitations](#19-known-limitations)
 20. [Deployment](#20-deployment)
 21. [Future improvements](#21-future-improvements)
+22. [Interview guide](#22-interview-guide)
 
 ---
 
@@ -477,7 +482,7 @@ Full diagrams for every feature are in [project_flowchart.md](project_flowchart.
 ## 18. Security considerations
 
 - **Sessions:** httpOnly cookies, `Secure` in production, `SameSite=Lax`. Refresh tokens are rotated and server-side invalidated on logout.
-- **CSRF:** `SameSite=Lax` cookies plus JSON/multipart APIs give reasonable protection for same-site deployments. A cross-site deployment (`SameSite=None`) would need CSRF tokens. **TODO: NEEDS CONFIGURATION**
+- **CSRF:** `SameSite=Lax` cookies plus JSON/multipart APIs give reasonable protection, and the deployment is same-origin (Vercel rewrites `/api` to Render), so `SameSite=Lax` applies. If the API were ever called cross-site (`SameSite=None`), CSRF tokens would be needed.
 - **Passwords:** bcrypt (10 rounds). Email and reset tokens are random and stored hashed, with a 20-minute expiry.
 - **Authorization:** every project route checks membership and role, and every child resource is scoped to its project.
 - **Data exposure:** user responses exclude the password, refresh token and verification/reset tokens.
@@ -505,7 +510,16 @@ Things the current backend doesn't support, so the UI doesn't offer them:
 
 ## 20. Deployment
 
-**Target:** frontend on **Vercel**, backend on **Render** (free tiers), database on **MongoDB Atlas**.
+**Status: deployed.**
+
+| Part | Host | URL |
+|---|---|---|
+| Frontend | Vercel (root directory `frontend`) | https://project-management-xi-red-13.vercel.app |
+| Backend API | Render web service (free) | https://project-management-o65w.onrender.com (health: `/api/v1/healthcheck`) |
+| Database | MongoDB Atlas | – |
+| Email | Mailtrap (sandbox: emails are captured in the Mailtrap inbox, not delivered) | – |
+
+Every push to `main` redeploys both Vercel and Render automatically.
 
 ```
 Browser ──► https://<app>.vercel.app
@@ -525,6 +539,17 @@ Browser ──► https://<app>.vercel.app
 | Environment | every variable from section 14, plus `NODE_ENV=production`, `CORS_ORIGIN=https://<app>.vercel.app`, `SERVER_URL=https://<app>.vercel.app`, `FORGOT_PASSWORD_REDIRECT_URL=https://<app>.vercel.app/reset-password`, `EMAIL_VERIFICATION_REDIRECT_URL=https://<app>.vercel.app/verify-email`. Render provides `PORT` itself. |
 
 MongoDB Atlas → Network Access must allow `0.0.0.0/0`, because Render's free tier has no fixed outbound IP.
+
+### Problems hit during the first deployment
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Cannot find module '/opt/render/project/src/index.js'` | Render's default start command `node index.js` (entry file is `src/index.js`) | Start command `npm start` |
+| Deploy stuck after "MongoDB connected" for 20+ minutes | `npm start` was entered as the **build** command, so the build step never finished | Build `npm install`, start `npm start` |
+| `MongoParseError: Invalid scheme` | `.env` line read `MONGO_URI=MONGO_URI=mongodb+srv://…` | Remove the duplicated key |
+| `bad auth: authentication failed` | Atlas login used instead of a database user | Create a user under Atlas → Security → Database Access |
+| `550 Sending from domain gmail.com is not allowed` | Mailtrap's live sending only allows verified domains | Use the Mailtrap sandbox for now |
+| Attachment links pointed to `localhost:8000` | URL variables were updated in the local `.env`, not in Render's Environment | Set them in Render and redeploy |
 
 ### Frontend (Vercel project)
 
@@ -550,3 +575,138 @@ MongoDB Atlas → Network Access must allow `0.0.0.0/0`, because Render's free t
 - Rate limiting, Helmet and enforced email verification
 - Route-level code splitting; real-time updates (WebSocket / SSE)
 - Dark mode
+
+---
+
+## 22. Interview guide
+
+This section explains the project in plain language so you can present it and answer questions about it. Each answer points to the real file, so you can open the code and check.
+
+### 22.1 The 30-second pitch
+
+> "Project Camp is a full-stack project-management app, like a small Basecamp. Users create projects, invite teammates by email and give them one of three roles per project: admin, project admin or member. Each project has a Kanban task board with subtasks, file attachments and assignees, plus a shared notes feed. The backend is an Express 5 REST API on MongoDB with JWT authentication in httpOnly cookies and role-based permissions. The frontend is React with TypeScript, TanStack Query and Tailwind. It's deployed with the frontend on Vercel and the API on Render."
+
+### 22.2 The two-minute architecture walkthrough
+
+1. **The browser loads the React app** from Vercel. React Router decides which page to show, and a route guard checks whether you're signed in by calling `POST /api/v1/auth/current-user`.
+2. **All API calls go to the same domain** (`/api/...`). Vercel forwards them to the Express server on Render (`frontend/vercel.json`), so the browser thinks it's talking to one website.
+3. **Express runs a middleware chain** for each request: parse JSON, read cookies, verify the JWT (`verifyJWT`), check the user's role in that project (`validateProjectPermission`), validate input (express-validator), then run the controller.
+4. **The controller talks to MongoDB** through Mongoose models and returns a standard `ApiResponse` object. Any thrown `ApiError` goes to one global error handler.
+5. **On the frontend, TanStack Query caches the response.** When you change something, the matching cache entries are invalidated and refetched, so every page stays in sync without a global store.
+
+### 22.3 Trace one request end to end
+
+*A member ticks a subtask as done.* This is a good one to tell because it touches every layer.
+
+| Step | What happens | Where |
+|---|---|---|
+| 1 | The user clicks the checkbox in the task drawer | `components/tasks/SubtaskList.tsx` |
+| 2 | `useToggleSubtask` updates the cache **before** the server answers (optimistic UI): the checkbox flips and the card's "2/3" counter changes immediately | `hooks/useTasks.ts` |
+| 3 | `taskApi.updateSubtask` sends `PUT /api/v1/tasks/:projectId/st/:subTaskId {isCompleted:true}` with cookies | `api/taskApi.ts`, `lib/http.ts` |
+| 4 | Vercel forwards the request to Render | `frontend/vercel.json` |
+| 5 | `verifyJWT` reads the `accessToken` cookie, verifies it and loads the user | `src/middlewares/auth.middleware.js` |
+| 6 | `validateProjectPermission(all roles)` finds the user's `ProjectMember` row for this project: not a member → 404 | same file |
+| 7 | `updateSubTask` loads the subtask, then checks that its parent task belongs to `:projectId` (blocks cross-project access), and saves | `src/controllers/task.controller.js` |
+| 8 | Response `200 {data: subtask}`. On error, the cache is rolled back to the saved snapshot and a toast appears | `hooks/useTasks.ts` |
+| 9 | `onSettled` invalidates the task queries, so the board and drawer refetch the real values | `hooks/useTasks.ts` |
+
+### 22.4 Key concepts in your own words
+
+**Authentication: access token + refresh token**
+- On login the server creates two JWTs. The **access token** (expires in 1 day) proves who you are on every request. The **refresh token** (10 days) is only used to get a new access token.
+- Both are stored in **httpOnly cookies**, which JavaScript can't read. So even if an attacker injected a script (XSS), they couldn't steal the tokens. That's why tokens are *not* stored in localStorage.
+- The refresh token is also saved in the database. That allows **rotation**: every refresh issues a new pair and replaces the stored one, so a stolen old refresh token stops working. Logout clears it.
+- Passwords are hashed with **bcrypt** in a Mongoose `pre("save")` hook (`src/models/user.models.js`), only when the password field changed.
+- Email verification and reset tokens are random bytes. The email contains the raw token, and the database stores only its **SHA-256 hash**, with a 20-minute expiry. A database leak therefore doesn't expose usable tokens.
+
+**The silent refresh (`frontend/src/lib/http.ts`)**
+- When any request returns **401**, an Axios interceptor calls `/auth/refresh-token` and then retries the original request. The user never notices.
+- It's **single-flight**: if five requests fail at once, they all wait for *one* refresh. Because the backend rotates refresh tokens, five parallel refreshes would invalidate each other and log the user out.
+- If the refresh fails, the session is cleared and the route guard sends the user to `/login`, remembering the page they were on.
+
+**Cookies across Vercel and Render**
+- `vercel.app` and `onrender.com` are different "sites", so cookies set by Render would be **third-party cookies**. Safari and iOS block those.
+- Solution: Vercel **rewrites** `/api/*` to Render. The browser only sees the Vercel domain, so cookies are first-party, `SameSite=Lax` works, and CORS isn't even involved.
+
+**Authorization: per-project roles (RBAC)**
+- Roles aren't stored on the user. They live in a **junction collection** `ProjectMember {user, project, role}`, so one person can be admin in one project and member in another.
+- `validateProjectPermission([...roles])` is a middleware factory: it takes the allowed roles and returns a middleware. That's why the routes read like `validateProjectPermission([ADMIN, PROJECT_ADMIN])`.
+- The frontend copies the same matrix in `lib/permissions.ts` and hides buttons the API would reject. The **backend is still the real protection**; hiding buttons is only UX.
+
+**IDOR (Insecure Direct Object Reference), the most important security fix**
+- Originally, the permission middleware checked membership of `:projectId` from the URL, but the controllers then loaded tasks and notes **by their own id only**.
+- So a member of project A could send `/tasks/<A>/t/<task id from project B>` and read or edit project B's task.
+- Fix: every lookup is scoped, e.g. `Task.findOne({ _id: taskId, project: projectId })`. Subtasks are checked through their parent task. An end-to-end test confirmed cross-project requests now return 404.
+
+**MongoDB aggregation**
+- `GET /projects` starts from the user's `ProjectMember` rows, uses `$lookup` to join the projects, and counts members with a second `$lookup` (`project.controller.js`).
+- `GET /tasks/:projectId/t/:taskId` uses several `$lookup`s to return the task with assignee, creator and subtasks (each with its creator) in **one query**.
+- The board shows subtask progress using one `$group` query over all subtasks (`completed: {$sum: {$cond: ["$isCompleted", 1, 0]}}`), instead of one query per task (avoids the N+1 problem).
+
+**File uploads**
+- `multer` saves files to `public/images` as `<timestamp>-<name>` (1 MB limit, 5 files). Express serves that folder statically, so the file URL is `SERVER_URL/images/<file>`.
+- The frontend sends `multipart/form-data` (`FormData`) for task create/edit.
+
+**Frontend state: TanStack Query**
+- Almost all state in this app is **server state** (data owned by the backend), so there's no Redux. TanStack Query handles caching, loading and error states, retries and refetching.
+- **Query keys** are hierarchical: `['projects', id, 'tasks']`. Invalidating that prefix refreshes the board *and* every cached task detail of that project.
+- **Optimistic updates** are used only where they're safe and easy to undo (moving a card between columns, ticking a subtask). Creates and deletes wait for the server.
+
+**Forms: React Hook Form + Zod**
+- Zod schemas validate on the client (e.g. password ≥ 8, passwords match). The backend validates again with express-validator, because the client can't be trusted.
+- When the server returns **422** with `errors: [{ field: message }]`, `applyApiErrorToForm` puts each message under the right input (`lib/errors.ts`).
+
+**Error handling, end to end**
+- Backend: controllers are wrapped in `asyncHandler`, so any thrown error reaches the global handler, which returns `{success:false, message, errors}`. It also maps a bad ObjectId to 400, a duplicate key to 409 and an upload error to 400.
+- Frontend: each status has its own UI. 401 → silent refresh, 403 → "access denied", 404 → "not found", 409/422 → field error, 5xx → retry button (queries auto-retry twice first).
+
+### 22.5 Bugs I found and fixed (use these as stories)
+
+Structure each story as **situation → problem → how I found it → fix → result**.
+
+1. **Cross-project data access (IDOR).** While reviewing the controllers I noticed tasks and notes were fetched by id only. I scoped every query to the project and verified it with an automated cross-project test that expects 404.
+2. **Password hash leak.** "Add member" returned the full user document, including the bcrypt hash and refresh token. I fixed it by selecting only public fields.
+3. **Privilege escalation.** A project admin could re-add *themselves* with role `admin`, because the endpoint upserted the role. Now existing members get 409, and only admins can grant admin.
+4. **CORS config never loaded.** `dotenv.config()` ran in `index.js` *after* `import app`, but ES module imports are evaluated first, so `app.js` read `process.env` too early. Fix: `import "dotenv/config"` as the very first import.
+5. **500 instead of 401 on refresh.** In Express 5, `req.body` is `undefined` when there's no body, so `req.body.refreshToken` crashed. A browser test caught it. Fix: optional chaining.
+6. **Broken attachment links.** The URL used `file.originalname`, but multer saved the file as `<timestamp>-<name>`. Fix: use `file.filename`.
+7. **Mobile page wider than the screen.** Hidden screen-reader labels (`position:absolute`) inside the horizontally scrolling board escaped its clipping, because their positioned ancestor was outside the scroller. Found by measuring element widths in a headless browser. Fix: `position: relative` on the cards.
+
+### 22.6 Likely questions and short answers
+
+| Question | Answer |
+|---|---|
+| Why httpOnly cookies and not localStorage? | JavaScript can't read httpOnly cookies, so an XSS bug can't steal the session. localStorage is readable by any script on the page. |
+| Doesn't using cookies open you to CSRF? | `SameSite=Lax` stops other sites from sending the cookies on cross-site POST/PUT/DELETE requests, and the API only accepts JSON or multipart bodies. A cross-site setup would need CSRF tokens. |
+| Why two tokens? | Short-lived access tokens limit the damage if one leaks. The long-lived refresh token is used rarely, is rotated, and can be revoked in the database. |
+| How do you log someone out on the server? | Logout clears the stored refresh token, so it can't create new access tokens. Existing access tokens stay valid until they expire (a known JWT trade-off). |
+| Why MongoDB? | Documents map naturally to projects, tasks and notes, and `$lookup` aggregations cover the joins we need. For heavily relational reporting, SQL would be a fair alternative. |
+| How are roles enforced? | A `ProjectMember` record per (user, project) holds the role. A middleware checks it on every project route; non-members get 404 so project ids can't be probed. |
+| Why 404 instead of 403 for non-members? | It doesn't reveal that the project exists. |
+| Why TanStack Query instead of Redux? | The state is server data. TanStack Query gives caching, deduplication, retries and invalidation out of the box, so there's much less code and no duplicate copy of server data. |
+| What happens when the access token expires mid-session? | The request returns 401, the interceptor refreshes once and retries, and the user doesn't notice. |
+| How do you stop two refresh calls at once? | A shared promise: the first 401 starts the refresh and the others await the same promise. |
+| How did you deploy, and what was tricky? | Vercel for the frontend and Render for the API. The tricky part was cookies across two domains, solved with Vercel rewrites so everything is same-origin. See the deployment problems table in section 20. |
+| How did you test it? | End-to-end scripts: about 88 API checks (auth, roles, IDOR, uploads, refresh) and 40 browser checks with Playwright (flows, permissions, mobile layout), run against a real backend and an in-memory MongoDB, plus a live smoke test. They aren't committed as a test suite yet. |
+| What would you improve next? | A committed test suite, cloud storage for uploads (Render's disk is temporary), rate limiting on login, pagination, and real email delivery with a verified domain. |
+| What's the weakest part right now? | Uploads on local disk (lost on Render redeploys), no rate limiting, and email verification isn't enforced. |
+
+### 22.7 Numbers worth remembering
+
+- **3** roles per project: admin, project_admin, member
+- **6** collections: users, projects, projectmembers, tasks, subtasks, projectnotes
+- **33** API endpoints: auth 10, projects 9, tasks 8, notes 5, health 1
+- **3** task statuses: todo, in_progress, done
+- Tokens: access **1 day**, refresh **10 days**, email/reset links **20 minutes**
+- Uploads: **5 files**, **1 MB** each
+
+### 22.8 A five-minute live demo script
+
+1. Open the live site and **register**. Point out the verification email arriving in Mailtrap, then click the link.
+2. **Create a project** and show yourself as admin.
+3. In a private window, register a second user. Back in the first window, open **Members** and invite them as **member**.
+4. Create two tasks, one with an **attachment** and an **assignee**. **Drag** a card to "In progress".
+5. Open a task, **add subtasks** and tick one. Show the counter on the card updating instantly.
+6. Switch to the member's window: no "New task" button, no Settings tab, but they **can tick subtasks**. Explain that the backend enforces this; the UI only mirrors it.
+7. Open **Notes** and add a note as admin; the member can read it.
+8. Shrink the browser to phone width to show the **responsive layout**, then sign out.
