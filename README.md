@@ -80,6 +80,8 @@ Small teams need one place to see what is being worked on, who owns it and what 
 | Forms & validation | React Hook Form + Zod (`@hookform/resolvers`) |
 | Styling | Tailwind CSS 4 (+ `tailwind-merge` for class overrides) |
 | UI | Custom components in `frontend/src/components/ui`, `lucide-react` icons, `sonner` toasts |
+| Testing | Vitest (backend and frontend), Supertest (HTTP tests against the Express app) |
+| CI | GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) |
 
 ## 5. Architecture
 
@@ -362,11 +364,14 @@ Project_Management/
 │   ├── validators/index.js
 │   ├── db/database.js
 │   └── utils/                  api-error, api-response, async-handles, constants, mail
+├── tests/                      Backend unit + HTTP tests (Vitest, Supertest)
 ├── public/images/              Uploaded attachments (git-ignored except .gitkeep)
+├── .github/workflows/ci.yml    CI pipeline: tests, typecheck and build on every push/PR
 ├── frontend/                   React SPA (see section 7)
-│   ├── src/ · public/ · index.html
+│   ├── src/ · public/ · index.html   (unit tests sit next to the code: src/lib/*.test.ts)
 │   ├── vite.config.ts · tsconfig*.json · package.json
 │   └── .env.example
+├── vitest.config.js            Backend test config (fake JWT secrets, no DB needed)
 ├── .env.example                Backend environment template
 ├── PRD.md                      Product requirements
 ├── project_flowchart.md        Architecture & flow diagrams
@@ -431,10 +436,33 @@ Start the backend first, then the frontend, and open **http://localhost:5173**. 
 | Where | Command | What it does |
 |---|---|---|
 | root | `npm run dev` / `npm start` | API with / without auto-reload |
+| root | `npm test` / `npm run test:watch` | Backend tests once / in watch mode |
 | frontend | `npm run dev` | Vite dev server with API proxy |
+| frontend | `npm test` / `npm run test:watch` | Frontend tests once / in watch mode |
 | frontend | `npm run typecheck` | TypeScript project check |
 | frontend | `npm run build` | Type-check + production build into `frontend/dist` |
 | frontend | `npm run preview` | Serve the production build locally |
+
+### Running the tests
+
+```bash
+npm test                    # backend, from the repository root
+cd frontend && npm test     # frontend
+```
+
+Neither suite needs MongoDB, a `.env` file or a running server, so they also run as-is in CI.
+
+| Suite | Files | What is covered |
+|---|---|---|
+| Backend: utilities | [`tests/utils.test.js`](tests/utils.test.js) | `ApiError`, `ApiResponse`, `asyncHandler` forwarding errors to `next()`, role and status constants |
+| Backend: validators | [`tests/validators.test.js`](tests/validators.test.js) | express-validator rules for register, login, projects, members and tasks, and the `validate` middleware returning 422 with `{ field: message }` errors |
+| Backend: HTTP | [`tests/app.test.js`](tests/app.test.js) | Through Supertest on the real Express app: healthcheck, CORS allow/deny, 422 validation responses, 401 for missing, wrongly signed and malformed tokens, and the JSON error format |
+| Frontend: helpers | [`frontend/src/lib/utils.test.ts`](frontend/src/lib/utils.test.ts) | Class merging, display names and initials, byte formatting, attachment names, stable project colours |
+| Frontend: permissions | [`frontend/src/lib/permissions.test.ts`](frontend/src/lib/permissions.test.ts) | The role → action matrix the UI uses to show or hide actions |
+| Frontend: validation | [`frontend/src/lib/validation.test.ts`](frontend/src/lib/validation.test.ts) | Zod rules for email, new passwords and usernames |
+| Frontend: API errors | [`frontend/src/lib/errors.test.ts`](frontend/src/lib/errors.test.ts) | Parsing API errors (422 field errors, hidden 5xx details, network errors) and mapping them onto form fields |
+
+The HTTP tests only hit paths that respond before any database query (validation and auth checks), which is why no database is needed. Flows that read or write data (creating projects, tasks, members) are not unit-tested yet; see section 21.
 
 ## 16. Frontend execution flow
 
@@ -504,7 +532,7 @@ Things the current backend doesn't support, so the UI doesn't offer them:
 - Email verification isn't enforced. Unverified users see a reminder banner.
 - No real-time updates. Data refreshes on mutations and on window focus.
 - Tasks stay assigned to a member after they are removed from the project.
-- No committed automated test suite yet (see future improvements).
+- The committed tests are unit and HTTP-level tests that don't touch the database. There are no database-backed integration tests or browser (end-to-end) tests in CI yet.
 - The production JS bundle is about 690 kB (about 212 kB gzipped). Route-level code splitting isn't done yet.
 - Mongoose logs deprecation warnings for the `new` option on `findOneAndUpdate`. They're harmless.
 
@@ -520,6 +548,24 @@ Things the current backend doesn't support, so the UI doesn't offer them:
 | Email | Mailtrap (sandbox: emails are captured in the Mailtrap inbox, not delivered) | – |
 
 Every push to `main` redeploys both Vercel and Render automatically.
+
+### Continuous integration (GitHub Actions)
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and on every pull request into `main`. It has two jobs that run in parallel on Ubuntu with Node.js 22:
+
+| Job | Steps |
+|---|---|
+| Backend tests | `npm ci` → `npm test` |
+| Frontend tests, typecheck & build | `npm ci` → `npm test` → `npm run build` (runs `tsc -b`, then `vite build`) |
+
+The result shows as a ✓ or ✗ next to each commit and pull request on GitHub (Actions tab for the logs). Deployment (CD) is still done by Vercel and Render, which deploy every push to `main` on their own. They don't wait for CI, so a failing commit is still deployed. To deploy only green builds, turn on Render's "Auto-Deploy: After CI checks pass" setting, and/or protect `main` on GitHub so pull requests can only merge once both CI jobs pass.
+
+```
+git push ──► GitHub
+              ├─ GitHub Actions: backend tests │ frontend tests + typecheck + build   (CI)
+              ├─ Render: npm install → npm start                                     (CD, API)
+              └─ Vercel: npm run build → frontend/dist                               (CD, frontend)
+```
 
 ```
 Browser ──► https://<app>.vercel.app
@@ -567,7 +613,7 @@ MongoDB Atlas → Network Access must allow `0.0.0.0/0`, because Render's free t
 
 ## 21. Future improvements
 
-- Automated tests: API integration tests (supertest + mongodb-memory-server) and Playwright UI tests
+- More automated tests: database-backed API integration tests (Supertest + mongodb-memory-server) and Playwright UI tests, added to the CI workflow
 - Profile editing and avatar upload; invitation emails and pending invites
 - Attachment removal and object storage (S3-compatible)
 - Due dates, priorities, comments and an activity history on tasks
@@ -660,7 +706,49 @@ This section explains the project in plain language so you can present it and an
 - Backend: controllers are wrapped in `asyncHandler`, so any thrown error reaches the global handler, which returns `{success:false, message, errors}`. It also maps a bad ObjectId to 400, a duplicate key to 409 and an upload error to 400.
 - Frontend: each status has its own UI. 401 → silent refresh, 403 → "access denied", 404 → "not found", 409/422 → field error, 5xx → retry button (queries auto-retry twice first).
 
-### 22.5 Bugs I found and fixed (use these as stories)
+### 22.5 "What was the hardest technical problem?": auth cookies across two domains
+
+Use this as the main answer. Remember the one-line version first, then expand if asked.
+
+> **One line:** "After deploying, login worked but the next request returned 401, because the frontend and API were on different domains and the auth cookie was being treated as third-party. I fixed it with Vercel rewrites so the browser only ever talks to one domain."
+
+**The full story (situation → problem → cause → fix → result)**
+
+1. **Situation.** The frontend was on Vercel (`*.vercel.app`) and the API on Render (`*.onrender.com`). Auth uses JWTs in httpOnly cookies.
+2. **Problem.** Login succeeded, but the very next request returned 401 and the user looked logged out.
+3. **Cause.** To the browser these are two different sites, so a cookie set by `onrender.com` is a **third-party cookie** on a `vercel.app` page. Our cookies are `SameSite=Lax` ([`auth.controller.js`](src/controllers/auth.controller.js)), and Lax cookies aren't sent on cross-site fetch/XHR requests. Safari/iOS block third-party cookies entirely.
+4. **Fix.** A reverse proxy using Vercel rewrites in [`frontend/vercel.json`](frontend/vercel.json):
+
+   ```json
+   { "source": "/api/:path*",    "destination": "https://<service>.onrender.com/api/:path*" },
+   { "source": "/images/:path*", "destination": "https://<service>.onrender.com/images/:path*" },
+   { "source": "/(.*)",          "destination": "/index.html" }
+   ```
+
+   - `/api/*` and `/images/*` are forwarded server-side to Render. `:path*` carries the rest of the path, so `/api/v1/auth/login` → `onrender.com/api/v1/auth/login`.
+   - Everything else serves `index.html`, so refreshing a deep link like `/projects/123` doesn't 404 (SPA routing).
+   - The frontend keeps a **relative** base URL, `VITE_API_BASE_URL=/api/v1` (`frontend/src/lib/http.ts`), never the Render URL.
+5. **Result.** The browser only sees `vercel.app`, so the cookie is **first-party**: `SameSite=Lax` works, no CORS is needed, and Safari works. Locally, the Vite dev proxy does the same job.
+
+```
+Browser ──► vercel.app/api/v1/auth/login
+               │  Vercel forwards it server-side
+               ▼
+            onrender.com/api/v1/auth/login  ── response + Set-Cookie
+               │
+Browser ◄── vercel.app   (the cookie now belongs to vercel.app)
+```
+
+**Likely follow-ups**
+
+| Question | Answer |
+|---|---|
+| What was the alternative? | `SameSite=None; Secure` cookies plus CORS with credentials. They'd still be third-party, so Safari blocks them, and CSRF protection gets weaker. |
+| What's the trade-off of the rewrite? | Every API call takes an extra hop (Vercel → Render), adding a little latency. For this app that's a small price. |
+| What is this pattern called? | A reverse proxy: the client talks to one server, which forwards requests to another behind the scenes. |
+| Did you change backend code? | No. It's a config change in `vercel.json`, plus pointing the URL env vars (`CORS_ORIGIN`, `SERVER_URL`, email redirect URLs) at the Vercel domain. |
+
+### 22.6 Bugs I found and fixed (use these as stories)
 
 Structure each story as **situation → problem → how I found it → fix → result**.
 
@@ -672,7 +760,7 @@ Structure each story as **situation → problem → how I found it → fix → r
 6. **Broken attachment links.** The URL used `file.originalname`, but multer saved the file as `<timestamp>-<name>`. Fix: use `file.filename`.
 7. **Mobile page wider than the screen.** Hidden screen-reader labels (`position:absolute`) inside the horizontally scrolling board escaped its clipping, because their positioned ancestor was outside the scroller. Found by measuring element widths in a headless browser. Fix: `position: relative` on the cards.
 
-### 22.6 Likely questions and short answers
+### 22.7 Likely questions and short answers
 
 | Question | Answer |
 |---|---|
@@ -686,12 +774,13 @@ Structure each story as **situation → problem → how I found it → fix → r
 | Why TanStack Query instead of Redux? | The state is server data. TanStack Query gives caching, deduplication, retries and invalidation out of the box, so there's much less code and no duplicate copy of server data. |
 | What happens when the access token expires mid-session? | The request returns 401, the interceptor refreshes once and retries, and the user doesn't notice. |
 | How do you stop two refresh calls at once? | A shared promise: the first 401 starts the refresh and the others await the same promise. |
-| How did you deploy, and what was tricky? | Vercel for the frontend and Render for the API. The tricky part was cookies across two domains, solved with Vercel rewrites so everything is same-origin. See the deployment problems table in section 20. |
-| How did you test it? | End-to-end scripts: about 88 API checks (auth, roles, IDOR, uploads, refresh) and 40 browser checks with Playwright (flows, permissions, mobile layout), run against a real backend and an in-memory MongoDB, plus a live smoke test. They aren't committed as a test suite yet. |
-| What would you improve next? | A committed test suite, cloud storage for uploads (Render's disk is temporary), rate limiting on login, pagination, and real email delivery with a verified domain. |
+| How did you deploy, and what was tricky? | Vercel for the frontend and Render for the API. The tricky part was cookies across two domains, solved with Vercel rewrites so everything is same-origin (full story in section 22.5). See the deployment problems table in section 20. |
+| How did you test it? | A committed Vitest suite (55 tests: utilities, validators, auth and validation over HTTP with Supertest, frontend permissions, form validation and error parsing) that GitHub Actions runs on every push and pull request, along with a typecheck and production build. Before that, end-to-end scripts: about 88 API checks (auth, roles, IDOR, uploads, refresh) and 40 browser checks with Playwright, run against a real backend and an in-memory MongoDB, plus a live smoke test. Those aren't in CI yet. |
+| What is your CI/CD setup? | CI: GitHub Actions runs backend tests, frontend tests, typecheck and build in two parallel jobs. CD: Vercel and Render deploy every push to `main` automatically. |
+| What would you improve next? | Database-backed integration tests in CI, cloud storage for uploads (Render's disk is temporary), rate limiting on login, pagination, and real email delivery with a verified domain. |
 | What's the weakest part right now? | Uploads on local disk (lost on Render redeploys), no rate limiting, and email verification isn't enforced. |
 
-### 22.7 Numbers worth remembering
+### 22.8 Numbers worth remembering
 
 - **3** roles per project: admin, project_admin, member
 - **6** collections: users, projects, projectmembers, tasks, subtasks, projectnotes
@@ -700,7 +789,7 @@ Structure each story as **situation → problem → how I found it → fix → r
 - Tokens: access **1 day**, refresh **10 days**, email/reset links **20 minutes**
 - Uploads: **5 files**, **1 MB** each
 
-### 22.8 A five-minute live demo script
+### 22.9 A five-minute live demo script
 
 1. Open the live site and **register**. Point out the verification email arriving in Mailtrap, then click the link.
 2. **Create a project** and show yourself as admin.
